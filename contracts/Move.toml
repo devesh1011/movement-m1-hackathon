@@ -1,0 +1,16 @@
+[package]
+name = "movement-m1-hack"
+version = "1.0.0"
+authors = []
+
+[addresses]
+move_goals = "0x08f5ffadbe0148eb6e2e0d2e6ff8956a4290e80a3c3949b5d6e13858cb4b463e"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/movementlabsxyz/aptos-core.git"
+rev = "movement"
+subdir = "aptos-move/framework/aptos-framework"
+
+[dev-dependencies]

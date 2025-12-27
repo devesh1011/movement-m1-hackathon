@@ -1,0 +1,249 @@
+module move_goals::challenge_factory {
+    use std::signer;
+    use std::vector;
+    use aptos_framework::coin::{Self, Coin};
+    use aptos_framework::aptos_coin::AptosCoin;
+    use aptos_framework::timestamp;
+    use aptos_framework::event;
+
+    const E_CHALLENGE_NOT_ACTIVE: u64 = 1;
+    const E_ALREADY_JOINED: u64 = 2;
+    const E_INCORRECT_STAKE: u64 = 3;
+    const E_NOT_AUTHORIZED: u64 = 4;
+    const E_CHALLENGE_NOT_FOUND: u64 = 5;
+    const E_INVALID_VERIFIER: u64 = 6;
+    const E_ALREADY_CLAIMED: u64 = 7;
+    const E_CHALLENGE_STILL_ACTIVE: u64 = 8;
+
+    /// The central struct holding all challenges
+    struct ChallengeHub has key {
+        challenges: vector<Challenge>,
+        payment_vault: Coin<AptosCoin>, 
+        admin: address,
+    }
+
+    /// Represents a single custom challenge
+    struct Challenge has store, drop {
+        id: u64,
+        creator: address,
+        verifier: address, 
+        title: vector<u8>,
+        duration_days: u64,
+        stake_amount: u64,
+        start_time: u64,
+        total_pool: u64,
+        active: bool,
+        participants: vector<address>,
+        survivors_claimed: u64, // Track how many winners have claimed
+    }
+
+    /// Tracks a user's progress across multiple challenges
+    struct UserProgress has key {
+        challenge_ids: vector<u64>, 
+        days_completed: vector<u64>,
+        last_check_in: vector<u64>, 
+        claimed: vector<bool>,      
+    }
+
+    // Events
+    #[event]
+    struct ChallengeCreated has drop, store {
+        id: u64,
+        creator: address,
+        stake: u64,
+        duration: u64,
+    }
+
+    #[event]
+    struct UserJoined has drop, store {
+        challenge_id: u64,
+        user: address,
+    }
+    
+    #[event]
+    struct CheckInVerified has drop, store {
+        challenge_id: u64,
+        user: address,
+        day_count: u64,
+    }
+
+    /// 1. Initialize the Module
+    public entry fun initialize(admin: &signer) {
+        let admin_addr = signer::address_of(admin);
+        if (!exists<ChallengeHub>(admin_addr)) {
+            move_to(admin, ChallengeHub {
+                challenges: vector::empty<Challenge>(),
+                payment_vault: coin::zero<AptosCoin>(),
+                admin: admin_addr,
+            });
+        }
+    }
+
+    /// 2. Create a Custom Challenge
+    public entry fun create_challenge(
+        creator: &signer,
+        title: vector<u8>,
+        duration: u64,
+        stake: u64,
+        verifier: address 
+    ) acquires ChallengeHub {
+        let hub_addr = @move_goals; 
+        let hub = borrow_global_mut<ChallengeHub>(hub_addr);
+        
+        let new_id = vector::length(&hub.challenges);
+        
+        let new_challenge = Challenge {
+            id: new_id,
+            creator: signer::address_of(creator),
+            verifier: verifier, 
+            title: title,
+            duration_days: duration,
+            stake_amount: stake,
+            start_time: timestamp::now_seconds(),
+            total_pool: 0,
+            active: true,
+            participants: vector::empty<address>(),
+            survivors_claimed: 0,
+        };
+
+        vector::push_back(&mut hub.challenges, new_challenge);
+
+        event::emit(ChallengeCreated {
+            id: new_id,
+            creator: signer::address_of(creator),
+            stake: stake,
+            duration: duration,
+        });
+    }
+
+    /// 3. Join Challenge
+    public entry fun join_challenge(
+        user: &signer,
+        challenge_id: u64
+    ) acquires ChallengeHub, UserProgress {
+        let user_addr = signer::address_of(user);
+        let hub_addr = @move_goals; 
+        let hub = borrow_global_mut<ChallengeHub>(hub_addr);
+        
+        let challenge = vector::borrow_mut(&mut hub.challenges, challenge_id);
+        
+        assert!(challenge.active, E_CHALLENGE_NOT_ACTIVE);
+        assert!(!vector::contains(&challenge.participants, &user_addr), E_ALREADY_JOINED);
+        
+        // Transfer Stake
+        let coins = coin::withdraw<AptosCoin>(user, challenge.stake_amount);
+        coin::merge(&mut hub.payment_vault, coins);
+        
+        // Update Challenge State
+        challenge.total_pool = challenge.total_pool + challenge.stake_amount;
+        vector::push_back(&mut challenge.participants, user_addr);
+
+        // Initialize User Progress if needed
+        if (!exists<UserProgress>(user_addr)) {
+            move_to(user, UserProgress {
+                challenge_ids: vector::empty(),
+                days_completed: vector::empty(),
+                last_check_in: vector::empty(),
+                claimed: vector::empty(),
+            });
+        };
+
+        let progress = borrow_global_mut<UserProgress>(user_addr);
+        vector::push_back(&mut progress.challenge_ids, challenge_id);
+        vector::push_back(&mut progress.days_completed, 0);
+        vector::push_back(&mut progress.last_check_in, 0);
+        vector::push_back(&mut progress.claimed, false);
+
+        event::emit(UserJoined { challenge_id, user: user_addr });
+    }
+
+    /// 4. Submit Verified Check-in
+    /// Only callable by the Verifier (Backend)
+    public entry fun submit_checkin(
+        verifier_account: &signer, 
+        user_addr: address,
+        challenge_id: u64
+    ) acquires ChallengeHub, UserProgress {
+        let hub_addr = @move_goals;
+        let hub = borrow_global_mut<ChallengeHub>(hub_addr);
+        let challenge = vector::borrow(&hub.challenges, challenge_id);
+
+        // Verify Authority
+        assert!(signer::address_of(verifier_account) == challenge.verifier, E_INVALID_VERIFIER);
+        assert!(challenge.active, E_CHALLENGE_NOT_ACTIVE);
+
+        let progress = borrow_global_mut<UserProgress>(user_addr);
+        
+        // Find the index of this challenge in the user's list
+        let (found, index) = get_challenge_index(&progress.challenge_ids, challenge_id);
+        assert!(found, E_CHALLENGE_NOT_FOUND);
+
+        // Update Progress
+        let current_days = *vector::borrow(&progress.days_completed, index);
+        let new_days = current_days + 1;
+        
+        *vector::borrow_mut(&mut progress.days_completed, index) = new_days;
+        *vector::borrow_mut(&mut progress.last_check_in, index) = timestamp::now_seconds();
+
+        event::emit(CheckInVerified { 
+            challenge_id, 
+            user: user_addr, 
+            day_count: new_days 
+        });
+    }
+
+    /// 5. Claim Rewards
+    /// Logic: Checks if user completed duration.
+    /// Payout = Stake (Simple Version) or Pool Share (Complex Version)
+    /// This implementation assumes "Survivor takes all" logic requires off-chain calculation
+    /// or a second "finalize" step. For Hackathon simplicity, we implement:
+    /// WINNER GETS STAKE BACK * 2 (Subsidized) OR just their stake if pool is small.
+    /// Below is the "Refund + Bonus" logic which is safest for hackathons without Oracles for "Total Survivors".
+    public entry fun claim_reward(
+        user: &signer,
+        challenge_id: u64
+    ) acquires ChallengeHub, UserProgress {
+        let user_addr = signer::address_of(user);
+        let hub_addr = @move_goals;
+        let hub = borrow_global_mut<ChallengeHub>(hub_addr);
+        let challenge = vector::borrow_mut(&mut hub.challenges, challenge_id);
+
+        let progress = borrow_global_mut<UserProgress>(user_addr);
+        
+        let (found, index) = get_challenge_index(&progress.challenge_ids, challenge_id);
+        assert!(found, E_CHALLENGE_NOT_FOUND);
+
+        let completed_days = *vector::borrow(&progress.days_completed, index);
+        let already_claimed = *vector::borrow(&progress.claimed, index);
+
+        assert!(!already_claimed, E_ALREADY_CLAIMED);
+        assert!(completed_days >= challenge.duration_days, E_NOT_AUTHORIZED);
+        
+        // Mark as claimed
+        *vector::borrow_mut(&mut progress.claimed, index) = true;
+        challenge.survivors_claimed = challenge.survivors_claimed + 1;
+
+        // Payout Logic:
+        // In a hackathon, complex division often fails if not everyone claims.
+        // We will return the User's Stake as the baseline reward.
+        // To implement "Pot Split", you would need a "Finalize" function called after end_time
+        // to count total survivors first.
+        let payout_amount = challenge.stake_amount;
+
+        let reward_coins = coin::extract(&mut hub.payment_vault, payout_amount);
+        coin::deposit(user_addr, reward_coins);
+    }
+
+    /// Helper Function to find index in vector
+    fun get_challenge_index(ids: &vector<u64>, target_id: u64): (bool, u64) {
+        let len = vector::length(ids);
+        let i = 0;
+        while (i < len) {
+            if (*vector::borrow(ids, i) == target_id) {
+                return (true, i)
+            };
+            i = i + 1;
+        };
+        (false, 0)
+    }
+}
