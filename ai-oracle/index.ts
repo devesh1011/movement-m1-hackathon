@@ -6,7 +6,7 @@ import {
   Ed25519PrivateKey,
 } from "@aptos-labs/ts-sdk";
 import { serve } from "bun";
-import { verifyData } from "./verifier";
+import { verifyData } from "./verifier"; // Ensure this path is correct
 
 // 1. Setup Configuration
 const privateKeyStr = process.env.VERIFIER_PRIVATE_KEY!;
@@ -21,8 +21,9 @@ const aptos = new Aptos(config);
 const privateKey = new Ed25519PrivateKey(privateKeyStr);
 const verifierAccount = Account.fromPrivateKey({ privateKey });
 
+console.log(`🚀 Verifier Server Live at http://localhost:3001`);
 console.log(
-  `🚀 Verifier Server Live: ${verifierAccount.accountAddress.toString()}`
+  `Using Verifier Address: ${verifierAccount.accountAddress.toString()}`
 );
 
 // 3. The Server Logic
@@ -31,26 +32,60 @@ serve({
   async fetch(req) {
     const url = new URL(req.url);
 
+    // --- CORS HEADERS (Crucial for Frontend) ---
+    const headers = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Content-Type": "application/json",
+    };
+
+    // Handle Preflight Options Request
+    if (req.method === "OPTIONS") {
+      return new Response(null, { headers });
+    }
+
     // Endpoint for daily check-in
     if (url.pathname === "/api/verify-checkin" && req.method === "POST") {
       try {
-        const { userAddress, challengeId, proofType, proofData } =
-          await req.json();
+        // Expect these fields from the frontend
+        const {
+          userAddress,
+          challengeId,
+          proofType,
+          proofData, // The Base64 string or text
+          challengeTitle, // "75 Hard"
+          taskDescription, // "Workout for 45 mins"
+        } = await req.json();
 
-        const isValid = await verifyData("", "", "");
+        console.log(`🔍 Received check-in for User: ${userAddress}`);
 
-        if (!isValid) {
+        // --- STEP 1: AI VERIFICATION ---
+        const verificationResult = await verifyData(
+          challengeTitle || "Protocol 75 Challenge",
+          taskDescription || "Daily Habit Task",
+          {
+            type: proofType, // 'image' or 'text'
+            content: proofData,
+            mimeType: "image/jpeg", // Defaulting to jpeg for simplicity
+          }
+        );
+
+        if (!verificationResult.verified) {
+          console.log(`❌ Verification Rejected: ${verificationResult.reason}`);
           return new Response(
-            JSON.stringify({ error: "Verification Failed" }),
-            { status: 400 }
+            JSON.stringify({
+              success: false,
+              error: "Verification Failed",
+              reason: verificationResult.reason,
+            }),
+            { status: 400, headers }
           );
         }
 
-        // --- STEP 2: BUILD MOVEMENT TRANSACTION ---
-        console.log(
-          `Verifying challenge ${challengeId} for user ${userAddress}...`
-        );
+        console.log(`✅ AI Approved. Submitting to Blockchain...`);
 
+        // --- STEP 2: BUILD MOVEMENT TRANSACTION ---
         const transaction = await aptos.transaction.build.simple({
           sender: verifierAccount.accountAddress,
           data: {
@@ -66,27 +101,29 @@ serve({
         });
 
         // --- STEP 4: WAIT FOR FINALITY ---
+        // Note: For speed, you might return early, but waiting ensures the UI updates correctly
         const response = await aptos.waitForTransaction({
           transactionHash: pendingTx.hash,
         });
+
+        console.log(`⛓️ Transaction Confirmed: ${pendingTx.hash}`);
 
         return new Response(
           JSON.stringify({
             success: true,
             txHash: pendingTx.hash,
           }),
-          {
-            headers: { "Content-Type": "application/json" },
-          }
+          { status: 200, headers }
         );
       } catch (err: any) {
-        console.error(err);
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-        });
+        console.error("Server Error:", err);
+        return new Response(
+          JSON.stringify({ error: err.message || "Internal Server Error" }),
+          { status: 500, headers }
+        );
       }
     }
 
-    return new Response("MoveGoals Verifier API", { status: 200 });
+    return new Response("MoveGoals Verifier API Running", { status: 200 });
   },
 });
