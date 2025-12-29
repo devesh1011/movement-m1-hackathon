@@ -1,106 +1,166 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { Navbar } from "@/components/navbar"
-import { challenges } from "@/lib/dummy-data"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Navbar } from "@/components/navbar";
+import { usePrivy } from "@privy-io/react-auth";
+import { supabase } from "@/lib/supabase";
+import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
+
+// Initialize Movement Client
+const config = new AptosConfig({
+  fullnode: "https://testnet.movementnetwork.xyz/v1",
+  network: Network.CUSTOM,
+});
+const aptos = new Aptos(config);
 
 export default function ChallengesFeed() {
-  const router = useRouter()
-  const [isAuthed, setIsAuthed] = useState(false)
+  const router = useRouter();
+  const { authenticated, ready, user } = usePrivy();
+  const [challenges, setChallenges] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if user is logged in
-    const sessionCookie = document.cookie.includes("scavnger-session=logged-in")
-    if (!sessionCookie) {
-      router.push("/")
-    } else {
-      setIsAuthed(true)
+    if (ready && !authenticated) {
+      router.push("/");
     }
-  }, [router])
 
-  if (!isAuthed) {
-    return null
-  }
+    if (authenticated) {
+      fetchLiveProtocols();
+    }
+  }, [ready, authenticated, router]);
+
+  const fetchLiveProtocols = async () => {
+    setErrorMsg(null);
+    setLoading(true);
+
+    try {
+      // 1. Fetch metadata from Supabase
+      const { data: metaData, error } = await supabase
+        .from("challenges")
+        .select("*");
+
+      if (error) {
+        console.error("Supabase error fetching challenge_metadata:", error);
+        setErrorMsg(error.message || "Failed to load protocols from Supabase.");
+        setChallenges([]);
+        return;
+      }
+
+      if (!metaData) {
+        console.warn("No protocol metadata returned from Supabase.");
+        setChallenges([]);
+        return;
+      }
+
+      // 2. Map or enrich on-chain state here if needed
+      setChallenges(metaData || []);
+    } catch (err: any) {
+      const message = err?.message || String(err) || "Unknown error";
+      console.error("Error loading protocols:", message, err);
+      setErrorMsg(message);
+      setChallenges([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!ready || loading)
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center font-mono text-[#FAFF00]">
+        SCANNING_SECTORS...
+      </div>
+    );
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-[#050505] text-white selection:bg-[#FAFF00] selection:text-black">
       <Navbar />
 
-      <main className="max-w-7xl mx-auto px-4 py-8 md:py-12">
-        {/* Section Title */}
-        <div className="mb-8 md:mb-12">
-          <h2
-            className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-white mb-2"
-            style={{ fontFamily: "'Chakra Petch', sans-serif" }}
-          >
-            ACTIVE ZONES
-          </h2>
-          <p className="text-xs uppercase tracking-widest text-gray-500 font-mono">
-            {challenges.length} PROTOCOLS AVAILABLE
-          </p>
+      <main className="max-w-7xl mx-auto px-6 py-12">
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 border-l-4 border-[#FAFF00] pl-6">
+          <div>
+            <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter italic">
+              Active Zones
+            </h2>
+            <p className="text-xs uppercase tracking-[0.3em] text-gray-500 font-mono mt-2">
+              Available Deployment Protocols: {challenges.length}
+            </p>
+          </div>
+          <div className="mt-4 md:mt-0">
+            <Link href="/create">
+              <button className="bg-white text-black font-black px-6 py-2 uppercase text-sm hover:bg-[#FAFF00] transition-all shadow-[4px_4px_0px_#444]">
+                + Initialize New Protocol
+              </button>
+            </Link>
+          </div>
         </div>
 
         {/* Challenges Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {challenges.map((challenge) => (
-            <Link key={challenge.id} href={`/challenge/${challenge.id}`}>
-              <div
-                className="brutal-card border-green-500 cursor-pointer group hover:border-yellow-400 transition-all duration-200"
-                style={{
-                  overflow: "hidden",
-                }}
+        {errorMsg ? (
+          <div className="border-2 border-red-600 bg-black/60 p-6 text-center text-red-400 uppercase font-mono mb-6">
+            Error loading protocols: {errorMsg}
+          </div>
+        ) : null}
+
+        {challenges.length === 0 ? (
+          <div className="border-2 border-dashed border-white/10 p-20 text-center uppercase font-mono text-gray-600">
+            No active protocols detected in this sector.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {challenges.map((challenge) => (
+              <Link
+                key={challenge.id}
+                href={`/challenge/${challenge.id}`}
+                className="group relative border-2 border-white/20 bg-black/50 p-6 transition-all hover:border-[#FAFF00]"
               >
-                {/* Card Header */}
-                <div className="border-b-2 border-green-500 pb-3 mb-4 group-hover:border-yellow-400">
-                  <h3
-                    className="text-sm md:text-base font-black uppercase tracking-tight text-green-500 group-hover:text-yellow-400 transition-colors"
-                    style={{ fontFamily: "'Chakra Petch', sans-serif" }}
-                  >
-                    {challenge.title}
+                <div className="group relative border-2 border-white/10 bg-black hover:border-[#FAFF00] transition-all p-4">
+                  {/* Category Tag */}
+                  <span className="absolute -top-3 left-4 bg-[#FAFF00] text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-tighter">
+                    {challenge.category || "General"}
+                  </span>
+
+                  <div className="aspect-video w-full bg-gray-900 mb-4 overflow-hidden relative">
+                    {challenge.cover_image_url ? (
+                      <img
+                        src={challenge.cover_image_url}
+                        alt=""
+                        className="object-cover w-full h-full grayscale group-hover:grayscale-0 transition-all"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-800 font-black text-4xl italic">
+                        SCAV
+                      </div>
+                    )}
+                  </div>
+
+                  <h3 className="text-xl font-black uppercase mb-4 group-hover:text-[#FAFF00] transition-colors">
+                    {challenge.title || `Protocol #${challenge.challenge_id}`}
                   </h3>
-                </div>
 
-                {/* Stats Grid */}
-                <div className="data-block space-y-2 mb-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500">BUY-IN:</span>
-                    <span className="text-green-500 font-bold">{challenge.buyIn} APT</span>
+                  <div className="grid grid-cols-2 gap-4 font-mono text-[11px] uppercase border-t border-white/10 pt-4">
+                    <div className="text-gray-500">
+                      STAKE: <span className="text-white">-- MOVE</span>
+                    </div>
+                    <div className="text-gray-500">
+                      ENROLLED: <span className="text-white">ACTIVE</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500">PLAYERS:</span>
-                    <span className="text-green-500 font-bold">{challenge.players}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500">POT:</span>
-                    <span className="text-green-500 font-bold">{challenge.pot} APT</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500">DURATION:</span>
-                    <span className="text-green-500 font-bold">{challenge.duration}D</span>
-                  </div>
-                </div>
 
-                {/* Footer Button */}
-                <div className="pt-4 border-t-2 border-green-500 group-hover:border-yellow-400">
-                  <button
-                    className="w-full bg-green-500 text-black px-3 py-2 font-mono font-bold uppercase text-xs border-2 border-black transition-all duration-200"
-                    style={{
-                      boxShadow: "2px 2px 0px rgba(0, 0, 0, 0.3)",
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault()
-                    }}
-                  >
-                    VIEW INTEL
-                  </button>
+                  <div className="mt-6">
+                    <div className="w-full py-3 border border-white/20 text-center text-xs font-bold group-hover:bg-white group-hover:text-black transition-all">
+                      VIEW INTEL_
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </main>
     </div>
-  )
+  );
 }
