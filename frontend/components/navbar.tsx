@@ -1,18 +1,30 @@
-"use client"
+"use client";
 
-import { useRouter, usePathname } from "next/navigation"
-import Link from "next/link"
+import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 
 export function Navbar() {
-  const router = useRouter()
-  const pathname = usePathname()
+  const router = useRouter();
+  const pathname = usePathname();
+  // Get the user and logout function from Privy
+  const { logout, user } = usePrivy();
 
-  const handleLogout = () => {
-    document.cookie = "scavnger-session=; max-age=0; path=/"
-    router.push("/")
-  }
+  // Helper to format the wallet address: 0x1234...5678
+  const formatAddress = (address: string) => {
+    return `${address.slice(0, 4)}...${address.slice(-4)}`;
+  };
 
-  const isActive = (path: string) => pathname === path
+  const handleLogout = async () => {
+    // 1. Clear your custom cookie
+    document.cookie = "scavnger-session=; max-age=0; path=/";
+    // 2. Perform Privy logout to clear internal state/embedded wallet
+    await logout();
+    // 3. Kick back to landing
+    router.push("/");
+  };
+
+  const isActive = (path: string) => pathname === path;
 
   return (
     <nav
@@ -23,10 +35,10 @@ export function Navbar() {
         {/* Logo */}
         <Link href="/home" className="group">
           <h1
-            className="text-xl md:text-2xl font-black uppercase tracking-tighter text-white group-hover:text-green-500 transition-colors"
+            className="text-xl md:text-2xl font-black uppercase tracking-tighter text-white group-hover:text-[#FAFF00] transition-colors"
             style={{ fontFamily: "'Chakra Petch', sans-serif" }}
           >
-            SCAVNGER
+            PROTOCOL 75
           </h1>
         </Link>
 
@@ -35,7 +47,9 @@ export function Navbar() {
           <Link href="/home">
             <button
               className={`px-3 py-1 text-xs font-mono uppercase tracking-tight transition-all ${
-                isActive("/home") ? "text-green-500 border-b-2 border-green-500" : "text-gray-500 hover:text-gray-300"
+                isActive("/home")
+                  ? "text-[#FAFF00] border-b-2 border-[#FAFF00]"
+                  : "text-gray-500 hover:text-gray-300"
               }`}
             >
               Active Zones
@@ -45,7 +59,7 @@ export function Navbar() {
             <button
               className={`px-3 py-1 text-xs font-mono uppercase tracking-tight transition-all ${
                 isActive("/dashboard")
-                  ? "text-green-500 border-b-2 border-green-500"
+                  ? "text-[#FAFF00] border-b-2 border-[#FAFF00]"
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
@@ -56,27 +70,34 @@ export function Navbar() {
 
         {/* Right Section */}
         <div className="flex items-center gap-2 md:gap-4">
-          {/* Wallet/Profile Block */}
-          <div className="hidden sm:block border-2 border-green-500 bg-gray-950 px-3 py-2 font-mono text-xs text-green-500">
-            <div>WALLET: 0x7A...9D2</div>
-            <div>STATUS: JACKED IN</div>
+          {/* Real Wallet Block */}
+          <div className="hidden sm:block border-2 border-white/20 bg-black px-3 py-2 font-mono text-[10px] text-gray-400">
+            <div className="text-[#00FF00]">
+              ID:{" "}
+              {user?.wallet?.address
+                ? formatAddress(user.wallet.address)
+                : "N/A"}
+            </div>
+            <div>STATUS: AUTH_SECURED</div>
           </div>
 
           {/* Create Challenge Button */}
           <Link href="/create">
-            <button className="brutal-button text-sm md:text-base whitespace-nowrap">CREATE</button>
+            <button className="bg-[#FAFF00] text-black font-black px-4 py-2 text-xs uppercase hover:bg-white transition-colors shadow-[2px_2px_0px_white]">
+              CREATE
+            </button>
           </Link>
 
           {/* Logout */}
           <button
             onClick={handleLogout}
-            className="brutal-button text-sm md:text-base whitespace-nowrap bg-red-600 hover:bg-red-700"
-            style={{ boxShadow: "4px 4px 0px rgb(255, 0, 0)" }}
+            className="bg-red-600 text-white font-black px-4 py-2 text-xs uppercase hover:bg-red-500 transition-colors"
+            style={{ boxShadow: "2px 2px 0px white" }}
           >
             EXIT
           </button>
         </div>
       </div>
     </nav>
-  )
+  );
 }
