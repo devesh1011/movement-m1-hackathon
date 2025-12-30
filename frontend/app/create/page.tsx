@@ -2,17 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy, useSendTransaction } from "@privy-io/react-auth";
+import { usePrivy } from "@privy-io/react-auth";
+import { useSignRawHash } from "@privy-io/react-auth/extended-chains";
 import { Navbar } from "@/components/navbar";
 import { supabase } from "@/lib/supabase";
-
+import {
+  generateSigningMessageForTransaction,
+  AccountAddress,
+} from "@aptos-labs/ts-sdk";
+import { aptos, CONTRACT_ADDRESS } from "@/lib/aptos";
 type Step = "objective" | "parameters" | "verification" | "confirm";
 
 export default function CreateChallengePage() {
   const router = useRouter();
-
-  // 3. Use real Auth hooks instead of cookies
   const { ready, authenticated, user } = usePrivy();
+  const { signRawHash } = useSignRawHash();
 
   const [step, setStep] = useState<Step>("objective");
   const [formData, setFormData] = useState({
@@ -63,42 +67,74 @@ export default function CreateChallengePage() {
   };
 
   const handleSubmit = async () => {
-    if (!user?.wallet?.address) {
-      alert("Wallet not detected. Please reconnect.");
-      return;
-    }
-
+    if (!user?.wallet?.address) return;
     setIsSubmitting(true);
 
     try {
-      // Use the corrected column names from your database schema
+      // 1. Build the Move Transaction (with FeePayer enabled)
+      const rawTxn = await aptos.transaction.build.simple({
+        sender: user.wallet.address,
+        withFeePayer: true, // Crucial for Shinami
+        data: {
+          function: `${CONTRACT_ADDRESS}::challenge_factory::create_challenge`,
+          functionArguments: [
+            formData.title, // vector<u8> string
+            formData.duration, // u64
+            formData.buyIn * 1e8, // u64 (Octas conversion)
+            "0x08f5ffadbe0148eb6e2e0d2e6ff8956a4290e80a3c3949b5d6e13858cb4b463e", // address
+          ],
+        },
+      });
+
+      const message = generateSigningMessageForTransaction(rawTxn);
+
+      const messageHex = Buffer.from(message).toString("hex");
+
+      const { signature } = await signRawHash({
+        address: user.wallet.address,
+        chainType: "aptos",
+        hash: `0x${messageHex}`, // Pass the hex string directly
+      });
+
+      // 3. Send to our Backend Sponsorship API
+      const moveWallet = user.linkedAccounts.find(
+        (acc: any) => acc.chainType === "aptos"
+      ) as any;
+
+      const response = await fetch("/api/sponsor-challenge", {
+        method: "POST",
+        body: JSON.stringify({
+          transactionHex: rawTxn.bcsToHex().toString(),
+          signatureHex: signature, // The raw signature from signRawHash
+          publicKeyHex: moveWallet.publicKey, // We need this!
+        }),
+      });
+
+      const result = await response.json();
+      console.log(result);
+      if (result.error) throw new Error(result.error);
+
+      // 4. Save to Supabase for UI tracking (Off-chain)
+      // 4. Save to Supabase (Mapping frontend names to DB names)
       const { error: dbError } = await supabase.from("challenges").insert({
-        creator_address: user.wallet.address, // Corrected from creator_wallet
+        tx_hash: result.hash,
         title: formData.title,
         description: formData.description,
-        duration_days: formData.duration, // Corrected from duration
+        duration_days: formData.duration,
         buy_in: formData.buyIn,
-        verification_type: formData.verificationType,
+        verification_type: formData.verificationType, // Fix naming mismatch
+        creator_address: user.wallet.address, // Add required field
         status: "open",
-        category: "other", // Required by your table constraint
       });
 
       if (dbError) {
-        // Log the specific Postgres error details
-        console.error(
-          "Database Error:",
-          dbError.message,
-          dbError.details,
-          dbError.hint
-        );
-        throw new Error(dbError.message);
+        console.error("Supabase Error:", dbError);
+        throw new Error(`Database Error: ${dbError.message}`);
       }
 
-      // Success!
       router.push("/home");
     } catch (err: any) {
-      console.error("Full Error Object:", err);
-      alert(`FAILED TO INITIALIZE: ${err.message || "Unknown Error"}`);
+      alert(`DEPLOYMENT_FAILED: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
