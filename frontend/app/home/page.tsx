@@ -82,11 +82,16 @@ export default function ChallengesFeed() {
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 border-l-4 border-[#FAFF00] pl-6">
           <div>
-            <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter italic">
-              Active Zones
-            </h2>
+            <h1
+              className="text-5xl md:text-7xl font-black uppercase tracking-tighter"
+              style={{ fontFamily: "'Chakra Petch', sans-serif" }}
+            >
+              <span className="text-white">ACTIVE</span>
+              <br />
+              <span className="text-[#FAFF00]">ZONES</span>
+            </h1>
             <p className="text-xs uppercase tracking-[0.3em] text-gray-500 font-mono mt-2">
-              Available Deployment Protocols: {challenges.length}
+              {challenges.length} PROTOCOLS AVAILABLE
             </p>
           </div>
           <div className="mt-4 md:mt-0">

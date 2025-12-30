@@ -71,59 +71,80 @@ export default function CreateChallengePage() {
     setIsSubmitting(true);
 
     try {
-      // 1. Build the Move Transaction (with FeePayer enabled)
+      // 1. Build the Move Transaction
       const rawTxn = await aptos.transaction.build.simple({
         sender: user.wallet.address,
-        withFeePayer: true, // Crucial for Shinami
+        withFeePayer: true,
         data: {
           function: `${CONTRACT_ADDRESS}::challenge_factory::create_challenge`,
           functionArguments: [
-            formData.title, // vector<u8> string
-            formData.duration, // u64
-            formData.buyIn * 1e8, // u64 (Octas conversion)
-            "0x08f5ffadbe0148eb6e2e0d2e6ff8956a4290e80a3c3949b5d6e13858cb4b463e", // address
+            formData.title,
+            formData.duration,
+            formData.buyIn * 1e8,
+            "0x08f5ffadbe0148eb6e2e0d2e6ff8956a4290e80a3c3949b5d6e13858cb4b463e",
           ],
         },
       });
 
+      // 2. Sign with Privy
       const message = generateSigningMessageForTransaction(rawTxn);
-
       const messageHex = Buffer.from(message).toString("hex");
 
       const { signature } = await signRawHash({
         address: user.wallet.address,
         chainType: "aptos",
-        hash: `0x${messageHex}`, // Pass the hex string directly
+        hash: `0x${messageHex}`,
       });
 
-      // 3. Send to our Backend Sponsorship API
       const moveWallet = user.linkedAccounts.find(
         (acc: any) => acc.chainType === "aptos"
       ) as any;
 
+      // 3. Submit to Sponsorship API
       const response = await fetch("/api/sponsor-challenge", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transactionHex: rawTxn.bcsToHex().toString(),
-          signatureHex: signature, // The raw signature from signRawHash
-          publicKeyHex: moveWallet.publicKey, // We need this!
+          signatureHex: signature,
+          publicKeyHex: moveWallet.publicKey,
         }),
       });
 
       const result = await response.json();
-      console.log(result);
       if (result.error) throw new Error(result.error);
 
-      // 4. Save to Supabase for UI tracking (Off-chain)
-      // 4. Save to Supabase (Mapping frontend names to DB names)
+      console.log("Waiting for indexing...");
+
+      // Wait for the transaction to be confirmed
+      const txnReceipt: any = await aptos.waitForTransaction({
+        transactionHash: result.hash,
+      });
+
+      // Look for the ChallengeCreated event in the transaction logs
+      const challengeEvent = txnReceipt.events.find((e: any) =>
+        e.type.includes("ChallengeCreated")
+      );
+
+      // Capture the ID assigned by the Move contract (vector index)
+      const onchain_id = challengeEvent?.data?.id;
+
+      if (onchain_id === undefined) {
+        console.warn(
+          "Could not find onchain_id in events. Joining might fail."
+        );
+      }
+
+      // 4. Save to Supabase with the NEW onchain_id column
       const { error: dbError } = await supabase.from("challenges").insert({
         tx_hash: result.hash,
+        onchain_id: onchain_id ? Number(onchain_id) : null, // Store the link
         title: formData.title,
         description: formData.description,
         duration_days: formData.duration,
         buy_in: formData.buyIn,
-        verification_type: formData.verificationType, // Fix naming mismatch
-        creator_address: user.wallet.address, // Add required field
+        verification_type: formData.verificationType,
+        creator_address: user.wallet.address,
         status: "open",
       });
 
@@ -134,6 +155,7 @@ export default function CreateChallengePage() {
 
       router.push("/home");
     } catch (err: any) {
+      console.error("Creation failed:", err);
       alert(`DEPLOYMENT_FAILED: ${err.message}`);
     } finally {
       setIsSubmitting(false);
@@ -154,14 +176,16 @@ export default function CreateChallengePage() {
       <main className="max-w-2xl mx-auto px-4 py-8 md:py-12">
         {/* Page Title */}
         <div className="mb-8 md:mb-12">
-          <h2
-            className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-2"
+          <h1
+            className="text-5xl md:text-6xl font-black uppercase tracking-tighter mb-2"
             style={{ fontFamily: "'Chakra Petch', sans-serif" }}
           >
-            CREATE CHALLENGE
-          </h2>
-          <p className="text-xs uppercase tracking-widest text-gray-500 font-mono">
-            MISSION CONFIGURATION
+            <span className="text-white">CREATE</span>
+            <br />
+            <span className="text-[#FAFF00]">CHALLENGE</span>
+          </h1>
+          <p className="text-xs uppercase tracking-widest text-gray-500 font-mono mt-3">
+            MISSION CONFIGURATION PROTOCOL
           </p>
         </div>
 
@@ -261,22 +285,23 @@ export default function CreateChallengePage() {
 
               <div>
                 <label className="block text-xs uppercase tracking-widest text-gray-400 font-mono mb-2">
-                  BUY-IN AMOUNT (APT)
+                  BUY-IN AMOUNT (MOVE)
                 </label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
+                    step="0.01"
                     value={formData.buyIn}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        buyIn: Number.parseInt(e.target.value),
+                        buyIn: parseFloat(e.target.value) || 0,
                       })
                     }
-                    min="1"
+                    min="0.01"
                     className="flex-1 border-2 border-white bg-gray-900 text-white px-3 py-2 font-mono text-sm focus:outline-none focus:bg-gray-800"
                   />
-                  <span className="font-mono text-white font-bold">APT</span>
+                  <span className="font-mono text-white font-bold">MOVE</span>
                 </div>
               </div>
 
@@ -286,7 +311,7 @@ export default function CreateChallengePage() {
                   ESTIMATED POT
                 </p>
                 <p className="text-2xl font-mono font-black text-yellow-400">
-                  {formData.buyIn * 100} APT
+                  {(formData.buyIn * 100).toFixed(2)} MOVE
                 </p>
                 <p className="text-xs text-gray-500 font-mono mt-1">
                   (calculated on 100 players)
@@ -378,7 +403,7 @@ export default function CreateChallengePage() {
                   <div className="flex justify-between">
                     <span className="text-gray-500">BUY-IN:</span>
                     <span className="text-white font-bold">
-                      {formData.buyIn} APT
+                      {formData.buyIn} MOVE
                     </span>
                   </div>
                   <div className="flex justify-between">
