@@ -3,48 +3,20 @@
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { WalletProvider } from "../components/wallet-providers";
 
-import { defineChain } from "viem";
-
-export const movement = defineChain({
-  id: 250,
-  name: "Movement Testnet",
-  network: "Movement Testnet",
-  nativeCurrency: {
-    decimals: 18, // Replace this with the number of decimals for your chain's native token
-    name: "MOVE",
-    symbol: "MOVE",
-  },
-  rpcUrls: {
-    default: {
-      http: ["https://testnet.movementnetwork.xyz/v1"],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: "Movement Bardrock Explorer",
-      url: "https://explorer.movementnetwork.xyz/?network=bardock+testnet",
-    },
-  },
-});
-
-export default function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <PrivyProvider
-      appId="cmjmq5tva04wki90c88mo1464"
-      clientId="client-WY6UFrg1gcWQbsc5h5s5aabPsjk8dQfwknc4Az5kmxnhR"
-      config={{
-        embeddedWallets: {
-          ethereum: {
-            createOnLogin: "users-without-wallets",
-          },
-        },
-        defaultChain: movement,
-        supportedChains: [movement],
-      }}
-    >
-      <UserSyncWrapper>{children}</UserSyncWrapper>
-    </PrivyProvider>
+    <WalletProvider>
+      <PrivyProvider
+        appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || "YOUR_PRIVY_APP_ID"}
+        config={{
+          loginMethods: ["email", "google", "twitter", "discord", "github"],
+        }}
+      >
+        <UserSyncWrapper>{children}</UserSyncWrapper>
+      </PrivyProvider>
+    </WalletProvider>
   );
 }
 
@@ -60,7 +32,6 @@ function UserSyncWrapper({ children }: { children: React.ReactNode }) {
             {
               wallet_address: user.wallet.address,
               email: user.email?.address || null,
-              // Use Google picture if available, otherwise Twitter, otherwise null
               avatar_url:
                 user.google?.picture || user.twitter?.profilePictureUrl || null,
               last_login: new Date().toISOString(),

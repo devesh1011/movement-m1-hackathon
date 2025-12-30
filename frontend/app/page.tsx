@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useLogin } from "@privy-io/react-auth";
 import { supabase } from "@/lib/supabase";
+import { createMovementWallet } from "@/lib/privy-movement";
+import { useCreateWallet } from "@privy-io/react-auth/extended-chains";
 
 export default function LandingPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const { ready, authenticated, login, user } = usePrivy();
+  const { ready, authenticated, user } = usePrivy();
+  const [isCreatingWallet, setIsCreatingWallet] = useState(false);
+  const [open, setOpen] = useState(false);
+  const { createWallet } = useCreateWallet();
 
   const [mounted, setMounted] = useState(false);
 
@@ -37,14 +42,53 @@ export default function LandingPage() {
     }
   }, [ready, authenticated, router, user]);
 
-  const handleLogin = async () => {
-    if (!ready) return;
-    setIsLoading(true);
+  const handleWalletCreation = async (user: any) => {
     try {
-      await login();
-    } catch (err) {
-      console.error(err);
-      setIsLoading(false);
+      setIsCreatingWallet(true);
+
+      const movementWallet = await createMovementWallet(user, createWallet);
+
+      setOpen(false);
+      return movementWallet;
+    } catch (error) {
+      console.error("Wallet creation error:", error);
+    } finally {
+      setIsCreatingWallet(false);
+    }
+  };
+
+  const { login } = useLogin({
+    onComplete: async ({ user }) => {
+      try {
+        // Create wallet after successful login
+        await handleWalletCreation(user);
+      } catch (error) {
+        console.error("Error in login completion:", error);
+        setIsCreatingWallet(false);
+      }
+    },
+    onError: (error) => {
+      console.error("Login failed:", error);
+      setIsCreatingWallet(false);
+    },
+  });
+
+  const handlePrivyLogin = async () => {
+    try {
+      setIsCreatingWallet(true);
+
+      if (!authenticated) {
+        await login({
+          loginMethods: ["email", "twitter", "google", "github", "discord"],
+          prefill: { type: "email", value: "" },
+          disableSignup: false,
+        });
+      } else {
+        await handleWalletCreation(user);
+      }
+    } catch (error) {
+      console.error("Privy login error:", error);
+      setIsCreatingWallet(false);
     }
   };
 
@@ -120,7 +164,7 @@ export default function LandingPage() {
             </div>
 
             <button
-              onClick={handleLogin}
+              onClick={handlePrivyLogin}
               disabled={!ready || isLoading}
               className="w-full bg-[#FAFF00] hover:bg-[#D4D900] text-black font-black text-2xl py-6 uppercase tracking-tighter transition-all hover:translate-x-1 hover:translate-y-1 shadow-[4px_4px_0px_white] hover:shadow-none"
             >

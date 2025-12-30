@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Chakra_Petch } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
-import Providers from "./providers";
+import { Providers } from "./providers";
 
 const monoFont = JetBrains_Mono({ subsets: ["latin"] });
 const titleFont = Chakra_Petch({ subsets: ["latin"], weight: ["700"] });
