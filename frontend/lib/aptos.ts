@@ -29,9 +29,7 @@ export const aptos = new Aptos(
 
 // Contract address
 export const CONTRACT_ADDRESS =
-  "0x88d5bf2a5368c3cf3283e952e70e510cb8ce6318cfd587f1164e549827c87596";
-
-// Utility to convert Uint8Array to hex string
+  "08f5ffadbe0148eb6e2e0d2e6ff8956a4290e80a3c3949b5d6e13858cb4b463e";
 export const toHex = (buffer: Uint8Array): string => {
   return Array.from(buffer)
     .map((b) => b.toString(16).padStart(2, "0"))
