@@ -39,11 +39,16 @@ export default function OnboardingForm({
 
   return (
     <div className="max-w-md w-full border-4 border-[#FAFF00] bg-black p-8 shadow-[12px_12px_0px_#333]">
-      <h2 className="text-3xl font-black uppercase mb-2 text-white italic">
-        Initialize Identity
-      </h2>
-      <p className="text-xs font-mono text-gray-500 mb-8 tracking-widest uppercase">
-        &gt; Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+      <h1
+        className="text-4xl font-black uppercase mb-3 text-[#FAFF00]"
+        style={{ fontFamily: "'Chakra Petch', sans-serif" }}
+      >
+        INITIALIZE
+        <br />
+        IDENTITY
+      </h1>
+      <p className="text-xs font-mono text-gray-400 mb-8 tracking-widest uppercase">
+        {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
       </p>
 
       <div className="space-y-6">
