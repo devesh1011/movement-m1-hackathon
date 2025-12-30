@@ -11,6 +11,54 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "");
 
 /**
+ * Add participant to challenge's participants_list in Supabase
+ * Atomic operation: adds wallet address to array and updates tx_hash if provided
+ */
+export const addParticipantToChallenge = async (
+  challengeId: number,
+  walletAddress: string,
+  txHash?: string
+) => {
+  try {
+    // 1. Fetch current challenge to get existing participants list
+    const { data: challenge, error: fetchError } = await supabase
+      .from("challenges")
+      .select("participants_list")
+      .eq("id", challengeId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // 2. Build new participants list (avoid duplicates)
+    const currentParticipants = challenge?.participants_list || [];
+    const updatedParticipants = Array.from(
+      new Set([...currentParticipants, walletAddress])
+    );
+
+    // 3. Update challenge with new participants list and tx_hash if provided
+    const updateData: any = {
+      participants_list: updatedParticipants,
+    };
+
+    if (txHash) {
+      updateData.tx_hash = txHash;
+    }
+
+    const { error: updateError } = await supabase
+      .from("challenges")
+      .update(updateData)
+      .eq("id", challengeId);
+
+    if (updateError) throw updateError;
+
+    return { success: true, participants: updatedParticipants };
+  } catch (error: any) {
+    console.error("❌ Error adding participant to challenge:", error);
+    throw error;
+  }
+};
+
+/**
  * PROTOCOL 75 HELPER: Upload Daily Proof
  * Uploads an image to Supabase Storage and returns the public URL
  */
