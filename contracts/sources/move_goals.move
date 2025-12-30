@@ -13,13 +13,14 @@ module move_goals::challenge_factory {
     const E_NOT_AUTHORIZED: u64 = 4; // Hub not initialized
     const E_CHALLENGE_NOT_FOUND: u64 = 5;
     const E_INVALID_VERIFIER: u64 = 6;
-    const E_ALREADY_CLAIMED: u64 = 7;
+    const E_ALREADY_CLAIMED: u64 = 7;   
     const E_CHALLENGE_STILL_ACTIVE: u64 = 8;
     const E_NOT_ADMIN: u64 = 9;
+    const E_INSUFFICIENT_FUNDS: u64 = 10;
 
     struct ChallengeHub has key {
         challenges: vector<Challenge>,
-        payment_vault: Coin<AptosCoin>, 
+        payment_vault: Coin<AptosCoin>,
         admin: address,
     }
 
@@ -139,6 +140,7 @@ module move_goals::challenge_factory {
             i = i + 1;
         };
         
+        // Withdraw stake from user and merge into vault
         let coins = coin::withdraw<AptosCoin>(user, challenge.stake_amount);
         coin::merge(&mut hub.payment_vault, coins);
         
@@ -209,14 +211,19 @@ module move_goals::challenge_factory {
         let already_claimed = *vector::borrow(&progress.claimed, index);
 
         assert!(!already_claimed, E_ALREADY_CLAIMED);
-        assert!(completed_days >= challenge.duration_days, E_NOT_AUTHORIZED);
+        assert!(completed_days >= challenge.duration_days, E_CHALLENGE_STILL_ACTIVE);
+        
+        // Verify sufficient funds in vault
+        let vault_balance = coin::value(&hub.payment_vault);
+        assert!(vault_balance >= challenge.stake_amount, E_INSUFFICIENT_FUNDS);
         
         *vector::borrow_mut(&mut progress.claimed, index) = true;
         challenge.survivors_claimed = challenge.survivors_claimed + 1;
 
+        // Extract reward and send to user
         let payout_amount = challenge.stake_amount;
         let reward_coins = coin::extract(&mut hub.payment_vault, payout_amount);
-        coin::deposit(user_addr, reward_coins);
+        coin::deposit<AptosCoin>(user_addr, reward_coins);
     }
 
     fun get_challenge_index(ids: &vector<u64>, target_id: u64): (bool, u64) {
