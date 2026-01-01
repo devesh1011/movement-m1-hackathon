@@ -21,6 +21,13 @@ export default function DashboardPage() {
   const [activeChallenges, setActiveChallenges] = useState<any[]>([]);
   const [showProofModal, setShowProofModal] = useState(false);
   const [selectedChallenge, setSelectedChallenge] = useState<any>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [isSubmittingProof, setIsSubmittingProof] = useState(false);
+  const [proofSubmissionStatus, setProofSubmissionStatus] = useState<{
+    type: "loading" | "success" | "error" | null;
+    message: string;
+  }>({ type: null, message: "" });
 
   useEffect(() => {
     if (ready && !authenticated) {
@@ -124,6 +131,102 @@ export default function DashboardPage() {
         ((TWENTY_FOUR_HOURS - timeSinceCheckIn) % 3600) / 60
       );
       return `${hoursRemaining}h ${minutesRemaining}m left`;
+    }
+  };
+
+  // Handle file selection
+  const handleProofFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith("image/") && !file.type.startsWith("text/")) {
+      setProofSubmissionStatus({
+        type: "error",
+        message: "Please upload an image or text file",
+      });
+      return;
+    }
+
+    setProofFile(file);
+
+    // Create preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setProofPreview(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle proof submission
+  const handleSubmitProof = async () => {
+    if (!proofFile || !selectedChallenge || !user?.wallet?.address) {
+      setProofSubmissionStatus({
+        type: "error",
+        message: "Missing file, challenge, or wallet",
+      });
+      return;
+    }
+
+    setIsSubmittingProof(true);
+    setProofSubmissionStatus({
+      type: "loading",
+      message: "Processing proof...",
+    });
+
+    try {
+      console.log("📤 Reading file as base64...");
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(proofFile);
+      });
+
+      console.log("📤 Submitting proof to backend...");
+
+      const response = await fetch("/api/submit-proof", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: user.wallet.address,
+          challengeId: selectedChallenge.id,
+          proofType: "image",
+          proofData: base64,
+          challengeTitle: selectedChallenge.title,
+          taskDescription: selectedChallenge.description,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Proof submission failed");
+      }
+
+      console.log("✅ Proof verified and submitted:", result.txHash);
+
+      setProofSubmissionStatus({
+        type: "success",
+        message: `✅ Proof verified! TX: ${result.txHash.slice(0, 10)}...`,
+      });
+
+      // Refresh dashboard data after 2 seconds
+      setTimeout(() => {
+        fetchDashboardData();
+        setShowProofModal(false);
+        setProofFile(null);
+        setProofPreview(null);
+        setProofSubmissionStatus({ type: null, message: "" });
+      }, 2000);
+    } catch (err: any) {
+      console.error("❌ Proof submission failed:", err);
+      setProofSubmissionStatus({
+        type: "error",
+        message: err.message || "Failed to submit proof",
+      });
+    } finally {
+      setIsSubmittingProof(false);
     }
   };
 
@@ -339,30 +442,107 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* Proof Modal (Simplified) */}
+      {/* Proof Modal */}
       {showProofModal && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="brutal-card border-yellow-400 max-w-md w-full bg-black">
-            <h4 className="text-xl font-black uppercase text-yellow-400 mb-6 border-b-2 border-yellow-400 pb-2 font-chakra">
-              TRANSMIT PROOF: {selectedChallenge?.title}
-            </h4>
-            <p className="text-xs text-gray-400 font-mono mb-6 italic">
-              * Verification will be processed by the AI Verifier Node.
-            </p>
-            <input
-              type="file"
-              className="w-full border-2 border-dashed border-gray-700 bg-gray-900 p-8 text-center font-mono text-sm mb-6"
-            />
-            <div className="flex gap-4">
+          <div className="brutal-card border-yellow-400 max-w-lg w-full bg-black">
+            <div className="flex justify-between items-center mb-6 pb-4 border-b-2 border-yellow-400">
+              <h2 className="text-xl font-black uppercase text-yellow-400 font-chakra">
+                TRANSMIT PROOF
+              </h2>
               <button
-                onClick={() => setShowProofModal(false)}
-                className="flex-1 border-2 border-white py-3 text-white font-black uppercase hover:bg-white hover:text-black"
+                onClick={() => {
+                  setShowProofModal(false);
+                  setProofFile(null);
+                  setProofPreview(null);
+                  setProofSubmissionStatus({ type: null, message: "" });
+                }}
+                className="text-gray-400 hover:text-white text-xl"
               >
-                ABORT
+                ✕
               </button>
-              <button className="flex-1 brutal-button-yellow py-3 text-black font-black uppercase">
-                CONFIRM SUBMISSION
-              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <p className="text-sm font-black text-white mb-2 uppercase">
+                  CHALLENGE: {selectedChallenge?.title}
+                </p>
+                <p className="text-xs text-gray-400 font-mono">
+                  {selectedChallenge?.description}
+                </p>
+              </div>
+
+              {/* File Preview */}
+              {proofPreview && (
+                <div className="border-2 border-cyan-500 p-4 bg-gray-950">
+                  <p className="text-xs text-cyan-500 font-mono uppercase mb-2">
+                    Preview
+                  </p>
+                  <img
+                    src={proofPreview}
+                    alt="Proof preview"
+                    className="w-full max-h-48 object-cover"
+                  />
+                </div>
+              )}
+
+              {/* File Upload */}
+              <div>
+                <label className="block text-xs font-black text-yellow-400 uppercase mb-3">
+                  Upload Proof
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,text/*"
+                  onChange={handleProofFileSelect}
+                  disabled={isSubmittingProof}
+                  className="w-full border-2 border-dashed border-gray-700 bg-gray-900 p-8 text-center font-mono text-sm cursor-pointer hover:border-cyan-500 transition-colors disabled:opacity-50"
+                />
+                {proofFile && (
+                  <p className="text-xs text-green-500 mt-2 font-mono">
+                    ✓ {proofFile.name}
+                  </p>
+                )}
+              </div>
+
+              {/* Status Messages */}
+              {proofSubmissionStatus.message && (
+                <div
+                  className={`p-3 border-2 font-mono text-sm ${
+                    proofSubmissionStatus.type === "loading"
+                      ? "border-cyan-500 bg-cyan-900/20 text-cyan-400"
+                      : proofSubmissionStatus.type === "success"
+                      ? "border-green-500 bg-green-900/20 text-green-400"
+                      : "border-red-500 bg-red-900/20 text-red-400"
+                  }`}
+                >
+                  {proofSubmissionStatus.message}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 border-t-2 border-gray-800 pt-6">
+                <button
+                  onClick={() => {
+                    setShowProofModal(false);
+                    setProofFile(null);
+                    setProofPreview(null);
+                    setProofSubmissionStatus({ type: null, message: "" });
+                  }}
+                  disabled={isSubmittingProof}
+                  className="flex-1 border-2 border-white py-3 text-white font-black uppercase hover:bg-white hover:text-black disabled:opacity-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={handleSubmitProof}
+                  disabled={!proofFile || isSubmittingProof}
+                  className="flex-1 brutal-button-yellow py-3 text-black font-black uppercase disabled:opacity-50"
+                >
+                  {isSubmittingProof ? "VERIFYING..." : "SUBMIT & VERIFY"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
