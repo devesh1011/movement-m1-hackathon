@@ -190,7 +190,7 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userAddress: user.wallet.address,
-          challengeId: selectedChallenge.id,
+          challengeId: selectedChallenge.onchain_id,
           proofType: "image",
           proofData: base64,
           challengeTitle: selectedChallenge.title,
